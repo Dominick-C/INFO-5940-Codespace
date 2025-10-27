@@ -1,92 +1,67 @@
-# INFO 5940 
-Welcome to the INFO 5940 repository. You will complete your work using [**GitHub Codespaces**](#about-github-codespaces) and save your progress in your own GitHub repository. This guide will walk you through setting up the development environment and running the test notebook.  
+-------------------------------------------------------------------------------------------------------------------------------------------------
+Running the app (GitHub Codespaces):
+Open your fork in GitHub Codespaces.
+Paste your API key into the dev container:
+Open: .devcontainer/devcontainer.json
+Find the "remoteEnv" block and set these values (replace with your own key):
+"OPENAI_API_KEY": "sk-PASTE_YOUR_KEY_HERE",
+"API_KEY": "sk-PASTE_YOUR_KEY_HERE",
+"OPENAI_BASE_URL": "https://api.ai.it.cornell.edu",
+"BASE_URL": "https://api.ai.it.cornell.edu/",
+"TZ": "America/New_York"
+Save the file.
+Rebuild the container so the environment is applied:
+Command Palette -> Codespaces: Rebuild Container
+Verify the environment in the terminal:
+echo "$OPENAI_API_KEY" | wc -c (should print a number > 0)
+echo "$OPENAI_BASE_URL" (should print https://api.ai.it.cornell.edu)
+Run the Streamlit app from the repo root:
+streamlit run chat_with_pdf.py --server.address 0.0.0.0 --server.port 8501
+Then open the forwarded URL:
+gp url 8501
+If gp is not available:
+echo "https://${CODESPACE_NAME}-8501.app.github.dev"
+Using the app:
+Upload .txt and/or .pdf files (multiple allowed).
+Click “Build / Update Index”.
+Ask questions in the chat box.
+Use “Reset chat” to clear messages, and “Clear index” to rotate to a fresh collection (prevents read-only DB errors).
+Note: Do not commit your personal API key to the repository. Remove or blank the key in .devcontainer/devcontainer.json before pushing.'
 
-## Getting Started 
+-------------------------------------------------------------------------------------------------------------------------------------------------
+Features overview 
+Multi-file ingestion: supports .txt and .pdf; 
 
-### Step 1: Fork this repository 
-1. Click the **Fork** button (top right of this page).
-2. This will create a copy of the repo under **your own GitHub account**.
+PDFs are parsed page-by-page before chunking. 
 
-Forking creates a personal copy of the repo under **your** GitHub account.  
-- You can commit, push, and experiment freely.  
-- Your work stays separate from the official class materials.
+Chunking: uses RecursiveCharacterTextSplitter; chunk size and overlap are adjustable in the sidebar. 
 
-### Step 2: Open your forked repo Codespace
-1. Go to **your forked repo**.
-2. Click the green **Code** button and switch to the **Codespaces** tab.  
-3. Select **Create Codespace**.
-4. Wait a few minutes for the environment to finish setting up.
+Vector database: Chroma with OpenAI embeddings; toggle between In-memory (recommended on Codespaces) and Disk (/tmp per session) to avoid read-only database issues. 
+Retrieval: similarity search with configurable top-k. 
 
-### Step 3: Verify your environment 
-Once the Codespace is ready: 
-1. If you are in `<your-file-name>.ipynb` in your codespace.
-2. Install the Python 3.11.13 Kernel.  In the top-right corner, click **Select Kernel**.
-    1. If **Install/Enable suggested extensions Python + Jupyter** appears, select it, and wait for the install to finish before moving on to the next step.
-    2. Select **Python Environments** choose **Python 3.11.13 (first option)**.
-3. Run the code block to check your setup. 
+Generation: answers are produced by a language model using only retrieved context; if the answer isn’t in the documents, the app says “I don’t know from the provided documents.”
 
-## About GitHub Codespaces
+Chat interface: multi-turn conversation with session history. 
 
-[Codespaces](https://docs.github.com/en/codespaces) is a complete software development and execution environment, running in the cloud, with its primary interface being a VSCode instance running in your browser.
+Transparency: “Sources” (filename, page, chunk id, score) and “Show matched chunks” (actual retrieved snippets) under each answer. 
 
-Codespaces is not free, but their per-month [free quota](https://docs.github.com/en/billing/concepts/product-billing/github-codespaces#free-quota) is generous.  Codespaces is free under the [GitHub Student Developer Pack](https://education.github.com/pack#github-codespaces).
+No secrets in code: the application reads API keys and base URL from environment variables. 
 
-### Codespaces Tips
+-------------------------------------------------------------------------------------------------------------------------------------------------
+Configuration changes (what was modified and why)
+chat_with_pdf.py: implements the complete RAG pipeline and the Streamlit chat UI; adds a toggle for In-memory vs Disk (/tmp) Chroma to prevent read-only errors; includes history-aware prompting and matched-chunk display; reads API credentials from environment variables (API_KEY or OPENAI_API_KEY, and OPENAI_BASE_URL).
 
-* Codespaces keep running even when you close your browser (but will time out and stop after a while)
-* Unless you're on a free plan, or within your free quota, costs acrue while the codespace is running, whether or not you have it open in your browser or are working on it
-* You can control when it's running, and the space it takes up.  Check out [GitHub's codespaces lifecycle documentation](https://docs.github.com/en/codespaces/about-codespaces/understanding-the-codespace-lifecycle)
+.devcontainer/devcontainer.json: uses remoteEnv names that the app reads (OPENAI_API_KEY, API_KEY, OPENAI_BASE_URL). Do not commit real keys; prefer Codespaces Secrets. Optional quality-of-life: forward port 8501 and auto-open in browser. 
 
-## Sync Updates 
-To make sure your personal forked repository stays up to date with the original class repository, please follow these steps:
-1. Open your forked repo.
-2. At the top of the page, you should see a banner or menu option that shows whether your fork is behind the original repo.
-3. Click the **Sync fork** button.
-4. In the dropdown, choose **Update branch** to pull the latest changes from the original repo into your fork.
+requirements.txt: ensure these packages are present if not already in the class template: streamlit, langchain, langchain-openai, langchain-chroma, chromadb, langgraph, langchain-text-splitters, langchain-community, pypdf, python-dotenv. 
+-------------------------------------------------------------------------------------------------------------------------------------------------
+Troubleshooting (not requierd just thought this could be helpful)
+“OPENAI_API_KEY / API_KEY is not set” banner: rebuild the container so remoteEnv or Codespaces Secrets are applied; confirm with echo commands above. 
 
-Optionally, you can also follow these steps to create a new branch on your fork:
-1. Open your **forked repository** on GitHub.  
-2. At the top of the page, next to the branch dropdown, click the **Branches** button.  
-3. In the **Branches** view, click the green **New Branch** button.  
-4. In the popup window, enter a branch name.  
-   - You can use any name you like, but it’s recommended to match the branch name used in class for better organization.  
-5. Under **Branch source**, select:  
-   - **Repository:** `AyhamB/INFO-5940-Codespace`  
-   - **Branch:** choose the branch you want to sync from (e.g., `streamlit`).  
-6. Click the green **Create New Branch** button.  
-7. Verify that you’re now back in **your fork**, on the new branch you just created.  
-8. Click the **Code** button and create a new Codespace (if you don’t already have one).  
-   - Make sure the Codespace is created from the **current branch**.
-  
-## Running a Streamlit App on Codespaces  
-Follow these steps to launch and view your Streamlit app in GitHub Codespaces:
-1. **Open the terminal** inside your Codespace.
-2. Run the command:  
-   ```bash
-   streamlit run your-file-name.py
-   ```  
-   **(Replace `your-file-name.py` with the actual name of your Streamlit app file, e.g., `hello_app.py`.)**
-3. After pressing **Enter**, a popup should appear in the bottom-right corner of Codespace editor.  
-   - Click **“Open in Browser”** to view your app.  
+No browser prompt: always bind to 0.0.0.0 and a fixed port (e.g., 8501). Use gp url 8501 or the Ports panel (open the globe icon). 
 
-   ⚠️ *If you miss the popup:*  
-   - Press **Ctrl + C** in the terminal to stop the app.  
-   - Rerun the command from step 2 — the popup should appear again.
-4. A new browser tab will open, showing the interface of your Streamlit app.
-5. **Make changes to your code** in the Codespace editor.  
-   - Refresh the browser tab to see the updated version of your app.  
+Read-only database errors: use “In-memory (recommended)” mode, or Disk mode under /tmp (the app creates a fresh subfolder per session)
 
-## Setting Your API Key in GH Codespaces
-You will receive an individual API Key for class assignments. To prevent accidental exposure online, please follow the steps below to securely insert your key in the terminal.
-1. **Open the terminal** inside your Codespace.
-2. Run the command to temporarily set your API Key for this session:  
-   ```bash
-   export API_KEY="your_actual_API_KEY"
-   ```
-3. If you want to run the Streamlit app and set up the key at the same time, run both commands together:
-   ```bash
-   API_KEY="your_actual_API_KEY" streamlit run your-file-name.py
-   ```
+PDFs not parsing: ensure pypdf is installed; try another PDF to rule out file corruption. 
 
-## Troubleshooting
-- The Jupyter extension should install automatically. If you still cannot select a Python kernel on Jupyter Notebook: Go to the left sidebar >> **Extensions** >> search for **Jupyter** >> reload window (or reinstall it).   
+Local (non-Codespaces) runs: export OPENAI_API_KEY and OPENAI_BASE_URL in your shell, or use a local .env that is gitignored.
