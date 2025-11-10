@@ -28,6 +28,37 @@ load_dotenv()  # Loads variables from a local .env if present
 os.environ.setdefault("OPENAI_LOG", "error")
 os.environ.setdefault("OPENAI_TRACING", "false")
 
+# === TESTING KEY OVERRIDES (DO NOT COMMIT REAL SECRETS) ======================
+# For local testing only: hard-code keys here if you don't want to use env/secrets.
+# Leave as None to fall back to environment variables or Streamlit secrets.
+TEST_KEYS: Dict[str, Optional[str]] = {
+    "OPENAI_API_KEY": "put opean ai key here",  # e.g., "sk-..."; set only for local testing
+    "TAVILY_API_KEY": "put tavily key here",  # e.g., "tvly-dev-..."; set only for local testing
+}
+
+def get_secret(name: str) -> Optional[str]:
+    """
+    Unified secret getter:
+    1) TEST_KEYS override (for local testing only)
+    2) Environment variables
+    3) Streamlit secrets (if configured)
+    """
+    override = TEST_KEYS.get(name)
+    if override:
+        return override
+    env_val = os.environ.get(name)
+    if env_val:
+        return env_val
+    if hasattr(st, "secrets") and name in st.secrets:
+        return st.secrets[name]  # type: ignore[index]
+    return None
+
+# If testing overrides are set, mirror them into environment so SDKs (e.g., OpenAI) see them.
+for _k, _v in TEST_KEYS.items():
+    if _v:
+        os.environ[_k] = _v
+# ============================================================================
+
 # Tool call logger: the UI sets this per request. The tool checks it and logs.
 # Using a simple global makes this easy to teach and reason about.
 TOOL_LOGGER: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -85,15 +116,15 @@ from agents import Agent, Runner, function_tool  # type: ignore
 def internet_search(query: str) -> str:
     """
     Internet search backed by Tavily.
-    - Reads TAVILY_API_KEY from environment.
+    - Reads TAVILY_API_KEY from TEST_KEYS/env/Streamlit secrets via get_secret().
     - Sends simple log events before/after the call so the UI can show activity.
     """
     log_tool_event({"type": "call", "tool": "internet_search", "args": {"query": redact_for_logs(query)}})
 
     try:
-        api_key = os.getenv("TAVILY_API_KEY")
+        api_key = get_secret("TAVILY_API_KEY")
         if not api_key:
-            msg = "missing TAVILY_API_KEY in environment."
+            msg = "missing TAVILY_API_KEY (set in TEST_KEYS, env, or st.secrets)."
             log_tool_event({"type": "error", "tool": "internet_search", "error": msg})
             return f"Search error: {msg}"
 
@@ -125,18 +156,94 @@ def internet_search(query: str) -> str:
 
 # BEGIN SOLUTION
 REVIEWER_INSTRUCTIONS = """
+Role: You are the Reviewer Agent. You MUST validate the Planner’s itinerary before it is shown to the user.
+You MAY (and should) call the `internet_search` tool to fact-check specific claims.
 
+Inputs:
+- The Planner’s Markdown itinerary (summary, budget, city clusters, day-by-day plan).
+
+Goals:
+1) Feasibility & consistency
+   • Opening hours / last entry times (by day/season if possible)
+   • Ticket requirements/prices/availability (note if advance booking is needed)
+   • Travel-time realism (within-city and inter-city transfers)
+   • Pace realism (avoid unrealistic stacking; add buffers)
+   • Overlaps/conflicts (time collisions, closed venues, too-tight connections)
+   • Budget realism (flag overages; suggest swaps that keep interests intact)
+2) Produce specific, actionable fixes as a **Delta List** (precise edits, not generalities).
+3) Apply those deltas to output a **Corrected Itinerary** ready for the user.
+
+How to use the tool:
+- Call `internet_search("concise query")` when evidence is required (e.g., "Louvre last entry time", "Rome→Florence train time", "Sagrada Familia ticket price").
+- Prefer official or authoritative sources by title/snippet. If results are inconclusive, state uncertainty and keep conservative assumptions—do not fabricate specifics.
+
+Output format (Markdown only):
+## Validation Summary
+- Bullet points of what you verified and any risks/uncertainties (quote source titles/snippets briefly).
+
+## Delta List
+1) Day X — Change: <precise replacement/move>. Reason: <why>. Evidence: <source title>.
+2) ...
+
+## Corrected Itinerary
+- Reprint the itinerary with all fixes applied. If no changes are required, say so and reprint the original.
+
+## Notes & Caveats
+- Prebooking windows, seasonal schedules, strike/holiday risks, or anything the traveler should double-check.
+
+Ground rules:
+- Maintain the user’s interests, dates, and budget while making corrections.
+- Add ~15–30 minute buffers around major entries and inter-neighborhood moves.
+- Keep claims modest if the tool cannot confirm specifics.
 """
 
 PLANNER_INSTRUCTIONS = """
+Role: You are the Planner Agent. You must NOT use the internet.
+Task: Expand the user’s vague travel prompt into a clear, feasible day-by-day itinerary.
 
+Requirements:
+- Respect user constraints (dates/timing if given, total budget, interests, preferred pacing).
+- Cluster days into sensible city/area groupings to minimize transit overhead.
+- For each day, include: morning/afternoon/evening blocks with approximate times, activity names, location/area, estimated costs, and simple logistics (walk/metro/bus/train/ridehail).
+- Keep a running budget (daily subtotal + trip total). Use conservative ranges when uncertain.
+- Do NOT assert precise opening hours or exact ticket prices; mark any item needing confirmation with **TO_VERIFY** for the Reviewer.
+- Prefer walking or single-line transit; avoid unrealistic back-to-back hops across a city.
+
+Output format (Markdown only):
+# Trip Summary
+- 2–4 sentences on theme, pacing, and city clusters.
+
+## Budget Overview
+- Currency (default USD if unspecified), daily subtotals, and total estimate.
+
+## City Cluster Plan
+- Cities/areas in order with 1–2 sentences on why the clustering reduces transit time.
+
+## Day-by-Day Itinerary
+Day 1 — <City> (<date if provided>)
+- 09:00–10:30: <Activity @ Place> — ~$<est>  — Logistics: <walk/metro/etc>
+- 11:00–12:30: <Activity> — ~$<est>
+- 12:30–14:00: Lunch in <area> — ~$<est>
+- 14:30–16:30: <Activity> — ~$<est>  **TO_VERIFY** (hours/tickets)
+- 17:00–19:00: <Light activity / neighborhood stroll> — ~$<est or $0>
+- Daily subtotal: ~$<sum>
+(Repeat for each day.)
+
+## Assumptions & Items to Verify
+- Key assumptions (e.g., staying near city center, transit pass).
+- Bullet list of all **TO_VERIFY** items for the Reviewer.
+
+Tone & style:
+- Practical and readable.
+- Approximate times and even pacing.
+- Conservative cost ranges; avoid overpacking days.
 """
 
 reviewer_agent = Agent(
     name="Reviewer Agent",
     model="openai.gpt-4o",
     instructions=REVIEWER_INSTRUCTIONS.strip(),
-    tools=[]
+    tools=[internet_search]  # enable the provided Tavily-backed search tool
 )
 
 planner_agent = Agent(
@@ -144,7 +251,6 @@ planner_agent = Agent(
     model="openai.gpt-4o",
     instructions=PLANNER_INSTRUCTIONS.strip(),
 )
-
 # END SOLUTION
 
 
